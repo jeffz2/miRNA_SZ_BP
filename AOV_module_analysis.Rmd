@@ -1,0 +1,30 @@
+---
+title: "AOV_module_analysis"
+output: html_document
+date: "2022-12-12"
+---
+
+### Load Data
+
+``` {r, echo = TRUE}
+ldata = load("miRNA_count_data_clean.RData")
+ldata
+
+lnames = load("miRNA_count-02-networkConstruction-stepByStep.RData")
+lnames
+samples = as.data.frame(miRNA.sample.cleaned)
+```
+### Run aov analysis
+``` {r, echo = TRUE}
+samples$ME1 = MEs$`ME#FF653E`
+summary(samples$ME1)
+samples$ME2 = MEs$`ME#FFCDC1`
+summary(samples$ME2)
+
+aovModel1 = aov(ME1 ~ as.factor(BrainRegion) + as.factor(PrimaryDx) + as.factor(Agegroup), data = samples)
+summary(aovModel1)
+
+aovModel2 = aov(ME2 ~ as.factor(BrainRegion) + as.factor(PrimaryDx) + as.factor(Agegroup), data = samples)
+summary(aovModel2)
+```
+

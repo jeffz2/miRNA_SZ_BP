@@ -1,0 +1,55 @@
+---
+title: "miRNA_count_WGCNA_setup"
+author: "Jeffrey Zhou"
+date: "2022-11-14"
+output: html_document
+---
+
+### Set up data
+``` {r, echo = TRUE}
+library(WGCNA)
+options(stringsAsFactors = FALSE)
+lnames = load(file = "miRNA_count_data_clean.RData")
+lnames
+```
+
+### Tidy Data 
+``` {r, echo = TRUE}
+
+dim(miRNA.count.cleaned)
+
+datExpr0 = as.data.frame(t(miRNA.count.cleaned))
+gsg = goodSamplesGenes(datExpr0, verbose = 3)
+gsg$allOK
+# Remove genes and samples with too many missing values
+if (!gsg$allOK)
+{
+  # Print the gene and sample names that were removed:
+  if (sum(!gsg$goodGenes)>0) 
+     printFlush(paste("Removing genes:", paste(names(datExpr0)[!gsg$goodGenes], collapse = ", ")));
+  if (sum(!gsg$goodSamples)>0) 
+     printFlush(paste("Removing samples:", paste(rownames(datExpr0)[!gsg$goodSamples], collapse = ", ")));
+  # Remove the offending genes and samples from the data
+  datExpr0 = datExpr0[gsg$goodSamples, gsg$goodGenes]
+}
+# Cluster samples and see if there any outliers
+sampleTree = hclust(dist(datExpr0), method = "average")
+sizeGrWindow(12, 9)
+# pdf(file = "miRNA_counts_sampleClustering.pdf", width = 12, height = 9)
+par(cex = 0.6)
+par(mar = c(0, 4, 2, 0))
+plot(sampleTree, main = "Sample clustering to detect outliers", sub = "", xlab = "", cex.lab = 1.5, cex.axis = 1.5, cex.main = 2)
+```
+
+### Use trait data to cluster samples
+
+``` {r, echo = TRUE}
+dim(miRNA.sample.cleaned)
+traitData = miRNA.sample.cleaned[ ,c("BrainRegion", "PrimaryDx", "Agegroup")]
+sampleTree2 = hclust(dist(datExpr0), method = "average")
+traitColors = labels2colors(traitData)
+plotDendroAndColors(sampleTree2, traitColors, groupLabels = names(traitData), main = "Sample dendrogram and trait heatmap")
+
+save(datExpr0, traitData, file = "miRNA_count-01_dataClean.Rdata")
+```
+
