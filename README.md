@@ -1,6 +1,6 @@
 # miRNA_SZ_BP
 
-Repository for files and code used for normalization and analysis in microRNA analysis of schizophrenic and bipolar samples. This repository contains two folders, (1) with the miRNA expression data and (2) with sample data along with R scripts containing the code ran during normalization and analysis of the data. 
+Repository for files and code used for normalization and analysis in microRNA analysis of schizophrenic and bipolar samples. This repository contains two folders, (1) with the miRNA expression data and sample information and (2) with sample data along with R scripts containing the code ran during normalization and analysis of the data. 
 
 ```
 1: Data
