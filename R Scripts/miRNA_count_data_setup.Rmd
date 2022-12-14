@@ -1,0 +1,158 @@
+---
+title: "miRNA_count_data_setup"
+author: "Jeffrey Zhou"
+date: '2022-11-11'
+output: html_document
+---
+
+### Load packages
+
+```{r}
+library(ggplot2)
+library(cqn)
+library(sva)
+library(Biostrings)
+```
+
+### Load and Tidy Data
+
+``` {r, echo = TRUE}
+# Create pca plot function and color pallet
+cbp1 <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#0072B2", "#D55E00", "#CC79A7") # color-blinded pallet
+
+pcaPlot <- function(pca.obj) { # create pca plot function for easy use
+  
+  pca.table <- data.frame(samples_clean, PC1=pca.obj$x[,1], PC2=pca.obj$x[,2], PC3 = pca.obj$x[,3])
+  pca.var <- signif(((pca.obj$sdev)^2)/(sum((pca.obj$sdev)^2)),3)*100
+  
+  p <- ggplot(pca.table, aes(PC1, PC2, color=PrimaryDx, shape = BrainRegion)) + facet_grid(.~Agegroup)
+  p <- p + geom_point(size=3, alpha = 0.7) 
+  p <- p + xlab(paste0("PC1: ", pca.var[1],"% variance")) 
+  p <- p + ylab(paste0("PC2: ", pca.var[2],"% variance")) 
+  return(p)
+}
+
+# Tidy counts data
+normalize <- function(){
+  data <- read.csv("miR.Counts.csv")
+  colnames(data) <- substring(colnames(data), 1, 6)
+  tmp <- data[1, -1] / 1000000
+  d <- mapply('/', data[-1, -1], tmp)
+  rownames(d) <- data[-1, 1]
+  as.data.frame(d)
+}
+counts = normalize()
+
+# Tidy sample data
+samples = read.csv("smallRNA_sampleInformation_EXTENDED_1449.csv")
+rownames(samples) = samples[ ,1]
+samples = samples[ ,-1]
+
+# Load miRBase data and calculate gc content
+miRBase = readDNAStringSet("mature.fa.gz")
+tmp = as.character(names(miRBase))
+miRBase.clean = as.data.frame(tmp)
+miRBase.clean = apply(miRBase.clean, 1, function(x) strsplit(x, " ")[[1]][1])
+miRBase.clean = as.data.frame(miRBase.clean)
+colnames(miRBase.clean) = c("id")
+miRBase.clean$gc = letterFrequency(miRBase, letters = "GC", as.prob = TRUE)
+index = which(substr(miRBase.clean$id, 1, 3) == "hsa")
+miRBase.clean = miRBase.clean[index, ]
+dim(miRBase.clean)
+```
+
+### Clean data
+```{r, echo = TRUE}
+samples_clean = subset(samples, rownames(samples) %in% colnames(counts))
+miRNA.count.cleaned = counts[ ,rownames(samples_clean)]
+
+
+# Remove miRNA without reads
+index = which(apply(miRNA.count.cleaned, 1, mean) == 0)
+miRNA.count.cleaned = miRNA.count.cleaned[-index, ]
+miRNA.sample.cleaned = samples
+
+# Reduce miRNA names
+tmp = miRBase.clean$id
+tmp = gsub("-5p", "", tmp)
+tmp = gsub("-3p", "", tmp)
+tmp = sapply(strsplit(tmp, split="-"), function(x) paste(x[1], x[2], gsub("[a-z]", "", x[3]), sep="-"))
+
+miRBase.mature.reduced = data.frame(id=unique(tmp), stringsAsFactors = F)
+dim(miRBase.mature.reduced)
+
+miRBase.mature.reduced$gc = sapply(miRBase.mature.reduced$id, function(x) {median(miRBase.clean$gc[grep(x, miRBase.clean$id)]) })
+
+# Make reduced miRNA IDs from count rownames
+tmp = rownames(miRNA.count.cleaned)
+tmp = gsub("-5p", "", tmp)
+tmp = gsub("-3p", "", tmp)
+tmp = sapply(strsplit(tmp, split="-"), function(x) paste(x[1], x[2], gsub("[a-z]", "", x[3]), sep="-"))
+
+# Matching
+flag <- tmp %in% miRBase.mature.reduced$id
+tmp[!(flag)]
+
+miRNA.count.cleaned = miRNA.count.cleaned[flag, ]
+dim(miRNA.sample.cleaned)
+
+miRNA.annot = as.data.frame(rownames(miRNA.count.cleaned))
+miRNA.annot$gc = sapply(tmp[flag], function(x) miRBase.mature.reduced$gc[which(x==miRBase.mature.reduced$id)])
+colnames(miRNA.annot) = c("id", "gc")
+```
+### Raw Count Normalization
+
+``` {r, echo = TRUE}
+tmp = log2(miRNA.count.cleaned+1)
+pca.raw = prcomp(t(tmp[which(apply(tmp,1,var)>0),]), center=T, scale=T)
+p = pcaPlot(pca.raw)
+p + ggtitle("PCA of log2 (raw count + 1)")
+```
+### CQN Normalization (GC%)
+
+``` {r, echo = TRUE}
+cqn.out = cqn(miRNA.count.cleaned, miRNA.annot$gc, lengthMethod = "fixed", lengths = 1000, verbose = TRUE)
+
+# CQN regression
+cqnplot(cqn.out, n = 1, xlab = "GC content",  main="Quantile Regression of log(count)")
+
+miRNA.count.cqn.log2 = cqn.out$y + cqn.out$offset
+index = which(apply(miRNA.count.cqn.log2,1,var)>0)
+pca.cqn = prcomp(t(miRNA.count.cqn.log2[index,]), center=T, scale=T)
+p = pcaPlot(pca.cqn)
+p + ggtitle("PCA of log2 (CQN-normalized count)")
+```
+### Regressing surrogate variables
+
+``` {r, echo = TRUE}
+# Model matrix
+mod1 = model.matrix(~as.factor(PrimaryDx)+as.factor(BrainRegion)+as.factor(Agegroup), data=samples_clean)
+mod0 = model.matrix(~1, data=samples_clean)
+
+# Calculate surrogate variables
+nsv = num.sv(miRNA.count.cqn.log2, mod1, method = "leek")
+nsv
+
+nsv = num.sv(miRNA.count.cqn.log2, mod1)
+nsv
+
+sva.out = sva(miRNA.count.cqn.log2, mod1, mod0, n.sv = nsv)
+
+# Regress out SVs
+miRNA.expr = miRNA.count.cqn.log2
+for (i in 1:nrow(miRNA.expr)) {
+  miRNA.expr[i, ] = lm(miRNA.expr[i, ] ~ sva.out$sv)$residuals
+}
+
+ind = which(apply(miRNA.expr, 1, var) > 0)
+pca.sva = prcomp(t(miRNA.expr[ind, ]), center = T, scale = T)
+
+# Plot data after SVA
+p = pcaPlot(pca.sva)
+p + ggtitle("PCA of with log2(regressed count)")
+```
+
+### Save normalized count matrix
+``` {r, echo = TRUE}
+save(miRNA.count.cleaned, miRNA.sample.cleaned, file = "miRNA_count_data_clean.RData")
+```

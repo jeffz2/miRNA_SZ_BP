@@ -1,0 +1,74 @@
+---
+title: "miRNA_count_network_construction"
+author: "Jeffrey Zhou"
+date: "2022-11-14"
+output: html_document
+---
+
+### Set up data
+``` {r, echo = TRUE}
+library(WGCNA)
+options(stringsAsFactors = FALSE)
+lnames = load(file = "miRNA_count-01_dataClean.Rdata")
+lnames
+```
+### Automatic network construction and module detection
+``` {r, echo = TRUE}
+#choose set of soft-thresholding powers
+powers = c(seq(from = 1, to = 17, by = 1))
+#call network topology analysis function
+sft = pickSoftThreshold(datExpr0, powerVector = powers, verbose = 5)
+#plot
+par(mfrow = c(1, 2))
+cex1 = 0.9
+#scale-free topology fit
+plot(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2], xlab="Soft Threshold (power)",ylab="Scale Free Topology Model Fit,signed R^2",type="n", main = paste("Scale independence"))
+text(sft$fitIndices[,1], -sign(sft$fitIndices[,3])*sft$fitIndices[,2],
+labels=powers,cex=cex1,col="red")
+abline(h = 0.9, col = "red")
+plot(sft$fitIndices[,1], sft$fitIndices[,5], xlab="Soft Threshold (power)",ylab="Mean Connectivity", type="n",
+main = paste("Mean connectivity"))
+text(sft$fitIndices[,1], sft$fitIndices[,5], labels=powers, cex=cex1,col="red")
+```
+
+### Step by step network construction and module detection
+``` {r, echo = TRUE}
+#co-expression similarity and adjacency
+softPower = 11
+adjacency = adjacency(datExpr0, power = softPower)
+#topological overlap matrix
+TOM = TOMsimilarity(adjacency)
+dissTOM = 1 - TOM
+
+#clustering
+geneTree = hclust(as.dist(dissTOM), method = "average")
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+labels = FALSE, hang = 0.04)
+
+minModuleSize = 30
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM, deepSplit = 2, pamRespectsDendro = FALSE, minClusterSize = minModuleSize)
+table(dynamicMods)
+dynamicColors = numbers2colors(dynamicMods)
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut", dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05, main = "Gene dendrogram and module colors")
+
+#merge modules who have similar expression profiles
+MEList = moduleEigengenes(datExpr0, colors = dynamicColors)
+MEs = MEList$eigengenes
+MEDiss = 1 - cor(MEs)
+METree = hclust(as.dist(MEDiss), method = "average")
+plot(METree, main = "Clustering of module eigengenes", xlab = "", sub = "")
+MEDissThres = 0.25
+abline(h=MEDissThres, col = "red")
+merge = mergeCloseModules(datExpr0, dynamicColors, cutHeight = MEDissThres, verbose = 3)
+mergedColors = merge$colors
+mergedMEs = merge$newMEs
+# pdf(file = "geneDendro-3.pdf", width = 9, height = 6)
+plotDendroAndColors(geneTree, cbind(dynamicColors, mergedColors), c("Dynamic Tree Cut", "Merged dynamic"), dendroLabels = FALSE, hang = 0.03, addGuide = TRUE, guideHang = 0.05)
+# dev.off()
+moduleColors = mergedColors
+colorOrder = c("grey", standardColors(50));
+moduleLabels = match(moduleColors, colorOrder)-1;
+MEs = mergedMEs;
+save(MEs, moduleLabels, moduleColors, geneTree, file = "miRNA_count-02-networkConstruction-stepByStep.RData")
+
+```
